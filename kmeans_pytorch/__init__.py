@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from glob import glob
 from tqdm import tqdm
 
 
@@ -17,7 +18,7 @@ def initialize(X, num_clusters):
 
 
 def kmeans(
-    X_FULL,
+    X_PATH,
     num_clusters,
     distance="euclidean",
     tol=1e-4,
@@ -46,95 +47,146 @@ def kmeans(
 
     initial_state = None
 
-    # convert to float
-    # X_FULL = X_FULL.half()
-    X_FULL = X_FULL.float()
-    # we cannot load the complete dataset in the memory so we need to approximate the dataset size
-    dataset_size = len(X_FULL)
+    X_CHUNK_PATHS = glob(X_PATH + "/*pt")
+    X_CHUNK_PATHS_ORDER = torch.randperm(len(X_CHUNK_PATHS))
+    X_CHUNK_PATHS_ORDERED = [X_CHUNK_PATHS[i] for i in X_CHUNK_PATHS_ORDER]
+
+    X_CHUNK_PATHS_TRAIN = X_CHUNK_PATHS_ORDERED[:-1]  # remove the last chunk from train
+    X_CHUNK_PATHS_VALID = X_CHUNK_PATHS_ORDERED[-1]  # leave one out for validation
+
+    print(f"Chunks used for training:\n{X_CHUNK_PATHS_TRAIN}")
+    print(f"Chunks used for validation:\n{X_CHUNK_PATHS_VALID}")
+
+    dataset_size = 100 * 16 * 1601 * len(X_CHUNK_PATHS)
 
     iteration = 0
     tqdm_meter = tqdm(desc="[running kmeans]")
-    # initial_state_list = []
 
     # Three epochs
     for epoch in range(1):
         print("Epoch", epoch)
-        X = None
-        start_index = 0
-        # shuffle the indices
-        rand_indices = torch.randperm(X_FULL.size(0))
-        X_FULL = X_FULL[rand_indices]
-        # For each epochs
-        while True:
-            # A subset of data
-            if X is None:
-                X = X_FULL[start_index : start_index + trunk_size].to(device)
-                # X = X_FULL[start_index:start_index + trunk_size]
-                print(
-                    "Process data from {} to {}".format(
-                        start_index, start_index + trunk_size
-                    )
-                )
+        # load upto 2 chunks because of memory constraints
+        for i in range(0, len(X_CHUNK_PATHS_TRAIN), 2):
 
-            # This initial_state is iteratively updated by the dataset
-            if initial_state is None:
-                initial_state = initialize(X, num_clusters)
-
-            choice_cluster = pairwise_distance_function(X, initial_state, device=device)
-
-            initial_state_pre = initial_state.clone()
-
-            # non_matched centroids usually increase as we increase the number of clusters
-            # there are some center shifts that keep happening as the centroids are recalculated
-            # with each new addition in the cluster corresponding to the centroid representing the cluster
-            non_matched_centroid = 0
-            for index in range(num_clusters):
-                # selected = torch.nonzero(choice_cluster == index).squeeze().cpu() # .to(device)
-                selected = torch.nonzero(choice_cluster == index).squeeze().to(device)
-                selected = torch.index_select(X, 0, selected)
-                if len(selected) == 0:
-                    initial_state[index] = initial_state_pre[index]
-                    non_matched_centroid += 1
-                else:
-                    initial_state[index] = selected.mean(dim=0)
-
-            center_shift = torch.mean(
-                torch.sqrt(torch.sum((initial_state - initial_state_pre) ** 2, dim=1))
-            )
-
-            center_shift_potential_inf = torch.sum(
-                torch.sqrt(torch.sum((initial_state - initial_state_pre) ** 2, dim=1))
-            )
-
-            assert not torch.isinf(initial_state).any(), initial_state
-
-            # increment iteration
-            iteration = iteration + 1
-            # update tqdm meter
-            tqdm_meter.set_postfix(
-                iteration=f"{iteration}",
-                center_shift=f"{center_shift ** 2:0.6f}",
-                center_shift_potential_inf=f"{center_shift_potential_inf ** 2:0.6f}",
-                tol=f"{tol:0.6f}",
-                non_matched_centroid=f"{non_matched_centroid:0.1f}",
-            )
-            tqdm_meter.update()
-
+            # if iteration reaches more than 200K then while loop breaks
+            # and the below condition would break the upper for loop too
+            # like mini-batch kmeans: run the algo for fixed number of iterations or until convergence (when centroids stop moving significantly).
             if iteration > 200000:
                 break
 
-            # if the center_shift_potential_inf**2 becomes less than tolerance, means the centroids are shifting that much so the centroids are stable
-            # we also make sure that the iteration for changing centroids with the current set of data doesn't exceed 200_000
-            # change the batch and start looking at the next chunks
-            if center_shift_potential_inf**2 < tol or iteration > 20000:
-                start_index += trunk_size
-                X = None
+            chunks = [
+                torch.load(X_CHUNK_PATHS_TRAIN[j])
+                for j in X_CHUNK_PATHS_TRAIN[i : i + 2]
+            ]
+            X_CHUNK = (
+                (torch.cat(chunks, dim=0)).float()
+                if len(chunks) > 1
+                else chunks[0].float()
+            )
+            chunk_size = X_CHUNK.size(0)
 
-                if start_index + trunk_size < dataset_size:
-                    continue
-                else:
-                    # Full data is processed
+            print(f"Loaded the pair of chunks: {X_CHUNK_PATHS_TRAIN[i:i+2]}")
+
+            X = None
+            start_index = 0
+            iteration_start = iteration
+
+            # shuffle the indices
+            rand_indices = torch.randperm(X_CHUNK.size(0))
+            X_CHUNK = X_CHUNK[rand_indices]
+            # For each epochs
+            while True:
+                # A subset of data
+                if X is None:
+                    X = X_CHUNK[start_index : start_index + trunk_size].to(device)
+                    # X = X_FULL[start_index:start_index + trunk_size]
+                    print(
+                        "Process data from {} to {}".format(
+                            start_index, start_index + trunk_size
+                        )
+                    )
+
+                # This initial_state is iteratively updated by the dataset
+                if initial_state is None:
+                    initial_state = initialize(X, num_clusters)
+
+                choice_cluster = pairwise_distance_function(
+                    X, initial_state, device=device
+                )
+
+                initial_state_pre = initial_state.clone()
+
+                # non_matched centroids usually increase as we increase the number of clusters
+                # there are some center shifts that keep happening as the centroids are recalculated
+                # with each new addition in the cluster corresponding to the centroid representing the cluster
+                non_matched_centroid = 0
+                for index in range(num_clusters):
+                    # selected = torch.nonzero(choice_cluster == index).squeeze().cpu() # .to(device)
+                    selected = (
+                        torch.nonzero(choice_cluster == index).squeeze().to(device)
+                    )
+                    selected = torch.index_select(X, 0, selected)
+                    if len(selected) == 0:
+                        initial_state[index] = initial_state_pre[index]
+                        non_matched_centroid += 1
+                    else:
+                        initial_state[index] = selected.mean(dim=0)
+
+                center_shift = torch.mean(
+                    torch.sqrt(
+                        torch.sum((initial_state - initial_state_pre) ** 2, dim=1)
+                    )
+                )
+
+                center_shift_potential_inf = torch.sum(
+                    torch.sqrt(
+                        torch.sum((initial_state - initial_state_pre) ** 2, dim=1)
+                    )
+                )
+
+                assert not torch.isinf(initial_state).any(), initial_state
+
+                # increment iteration
+                # the iterations on the current chunk keep increasing till the center_shift_potential_inf**2 < tol
+                iteration = iteration + 1
+                # update tqdm meter
+                tqdm_meter.set_postfix(
+                    iteration=f"{iteration}",
+                    center_shift=f"{center_shift ** 2:0.6f}",
+                    center_shift_potential_inf=f"{center_shift_potential_inf ** 2:0.6f}",
+                    tol=f"{tol:0.6f}",
+                    non_matched_centroid=f"{non_matched_centroid:0.1f}",
+                )
+                tqdm_meter.update()
+
+                # if the total iterations exceed 200000 then break the algorithm; set the hard limit
+                if iteration > 200000:
                     break
+
+                # not sure why the logic "or iteration > 20000" is added in previous code:
+                # that won't let the centroids adjust to the current set of data and keep sliding the window to see newer data
+                # when the above mentioned condition is satisfied
+                # if center_shift_potential_inf**2 < tol or iteration > 20000:
+                #     start_index += trunk_size
+                #     X = None
+
+                # changed to:
+                # if the center_shift_potential_inf**2 becomes less than tolerance, means the centroids aren't shifting that much so the centroids are stable so move on to the next trunk
+                # if it's taking more than 20K iterations on that specific trunk then move on to the next
+                if (
+                    center_shift_potential_inf**2 < tol
+                    or (iteration - iteration_start) > 20000
+                ):
+                    iteration_start = iteration
+                    start_index += trunk_size
+                    X = None
+
+                    if start_index + trunk_size < chunk_size:
+                        continue
+                    else:
+                        # Full data is processed
+                        print("The current chunk has been processed succesfully!")
+                        break
 
     return choice_cluster.cpu(), initial_state.cpu()
 
