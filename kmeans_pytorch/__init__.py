@@ -17,12 +17,12 @@ def initialize(X, num_clusters):
 
 
 def kmeans(
-        X_FULL,
-        num_clusters,
-        distance='euclidean',
-        tol=1e-4,
-        trunk_size=2560000,
-        device=torch.device('cpu')
+    X_FULL,
+    num_clusters,
+    distance="euclidean",
+    tol=1e-4,
+    trunk_size=2560000,
+    device=torch.device("cpu"),
 ):
     """
     perform kmeans
@@ -33,13 +33,13 @@ def kmeans(
     :param device: (torch.device) device [default: cpu]
     :return: (torch.tensor, torch.tensor) cluster ids, cluster centers
     """
-    print(f'running k-means on {device}..')
+    print(f"running k-means on {device}..")
 
-    if distance == 'euclidean':
+    if distance == "euclidean":
         pairwise_distance_function = pairwise_distance
-    elif distance == 'euclidean_mem_efficient':
+    elif distance == "euclidean_mem_efficient":
         pairwise_distance_function = pairwise_distance_euclidean_mem_efficient_batched
-    elif distance == 'cosine':
+    elif distance == "cosine":
         pairwise_distance_function = pairwise_cosine
     else:
         raise NotImplementedError
@@ -49,10 +49,11 @@ def kmeans(
     # convert to float
     # X_FULL = X_FULL.half()
     X_FULL = X_FULL.float()
-    dataset_size=len(X_FULL)
+    # we cannot load the complete dataset in the memory so we need to approximate the dataset size
+    dataset_size = len(X_FULL)
 
     iteration = 0
-    tqdm_meter = tqdm(desc='[running kmeans]')
+    tqdm_meter = tqdm(desc="[running kmeans]")
     # initial_state_list = []
 
     # Three epochs
@@ -67,9 +68,13 @@ def kmeans(
         while True:
             # A subset of data
             if X is None:
-                X = X_FULL[start_index:start_index + trunk_size].to(device)
+                X = X_FULL[start_index : start_index + trunk_size].to(device)
                 # X = X_FULL[start_index:start_index + trunk_size]
-                print("Process data from {} to {}".format(start_index, start_index + trunk_size))
+                print(
+                    "Process data from {} to {}".format(
+                        start_index, start_index + trunk_size
+                    )
+                )
 
             # This initial_state is iteratively updated by the dataset
             if initial_state is None:
@@ -79,6 +84,9 @@ def kmeans(
 
             initial_state_pre = initial_state.clone()
 
+            # non_matched centroids usually increase as we increase the number of clusters
+            # there are some center shifts that keep happening as the centroids are recalculated
+            # with each new addition in the cluster corresponding to the centroid representing the cluster
             non_matched_centroid = 0
             for index in range(num_clusters):
                 # selected = torch.nonzero(choice_cluster == index).squeeze().cpu() # .to(device)
@@ -89,16 +97,14 @@ def kmeans(
                     non_matched_centroid += 1
                 else:
                     initial_state[index] = selected.mean(dim=0)
-            
+
             center_shift = torch.mean(
-                torch.sqrt(
-                    torch.sum((initial_state - initial_state_pre) ** 2, dim=1)
-                ))
+                torch.sqrt(torch.sum((initial_state - initial_state_pre) ** 2, dim=1))
+            )
 
             center_shift_potential_inf = torch.sum(
-                torch.sqrt(
-                    torch.sum((initial_state - initial_state_pre) ** 2, dim=1)
-                ))
+                torch.sqrt(torch.sum((initial_state - initial_state_pre) ** 2, dim=1))
+            )
 
             assert not torch.isinf(initial_state).any(), initial_state
 
@@ -106,18 +112,21 @@ def kmeans(
             iteration = iteration + 1
             # update tqdm meter
             tqdm_meter.set_postfix(
-                iteration=f'{iteration}',
-                center_shift=f'{center_shift ** 2:0.6f}',
-                center_shift_potential_inf=f'{center_shift_potential_inf ** 2:0.6f}',
-                tol=f'{tol:0.6f}',
-                non_matched_centroid=f'{non_matched_centroid:0.1f}'
+                iteration=f"{iteration}",
+                center_shift=f"{center_shift ** 2:0.6f}",
+                center_shift_potential_inf=f"{center_shift_potential_inf ** 2:0.6f}",
+                tol=f"{tol:0.6f}",
+                non_matched_centroid=f"{non_matched_centroid:0.1f}",
             )
             tqdm_meter.update()
-            
+
             if iteration > 200000:
                 break
 
-            if center_shift_potential_inf ** 2 < tol or iteration > 20000:
+            # if the center_shift_potential_inf**2 becomes less than tolerance, means the centroids are shifting that much so the centroids are stable
+            # we also make sure that the iteration for changing centroids with the current set of data doesn't exceed 200_000
+            # change the batch and start looking at the next chunks
+            if center_shift_potential_inf**2 < tol or iteration > 20000:
                 start_index += trunk_size
                 X = None
 
@@ -131,10 +140,7 @@ def kmeans(
 
 
 def kmeans_predict(
-        X,
-        cluster_centers,
-        distance='euclidean',
-        device=torch.device('cpu')
+    X, cluster_centers, distance="euclidean", device=torch.device("cpu")
 ):
     """
     predict using cluster centers
@@ -144,13 +150,13 @@ def kmeans_predict(
     :param device: (torch.device) device [default: 'cpu']
     :return: (torch.tensor) cluster ids
     """
-    print(f'predicting on {device}..')
+    print(f"predicting on {device}..")
 
-    if distance == 'euclidean':
+    if distance == "euclidean":
         pairwise_distance_function = pairwise_distance
-    elif distance == 'euclidean_mem_efficient':
+    elif distance == "euclidean_mem_efficient":
         pairwise_distance_function = pairwise_distance_euclidean_mem_efficient
-    elif distance == 'cosine':
+    elif distance == "cosine":
         pairwise_distance_function = pairwise_cosine
     else:
         raise NotImplementedError
@@ -166,21 +172,24 @@ def kmeans_predict(
 
     return choice_cluster.cpu()
 
-def pairwise_distance_euclidean_mem_efficient_batched(data1, data2, device=torch.device('cpu'), batch_size=25600):
+
+def pairwise_distance_euclidean_mem_efficient_batched(
+    data1, data2, device=torch.device("cpu"), batch_size=25600
+):
     """
     Compute pairwise Euclidean distance in a memory-efficient way, suitable for large datasets.
-    
+
     Args:
     - data1 (Tensor): Tensor of shape [N, D], where N is the number of vectors and D is the dimensionality.
     - data2 (Tensor): Tensor of shape [M, D], where M is the number of vectors and D is the dimensionality.
     - device (torch.device): The device (CPU/GPU) on which to perform the computation.
     - batch_size (int): The size of each batch to be processed. Adjust based on your GPU's memory capacity.
-    
+
     Returns:
     - distances (Tensor): A tensor containing the pairwise distances between each pair of vectors in data1 and data2.
     """
     # Transfer data2 to GPU and compute its squared norm
-    data2 = data2.to(device) # TODO try out half here
+    data2 = data2.to(device)  # TODO try out half here
     norm2 = data2.pow(2).sum(dim=1, keepdim=True)
 
     # Initialize a tensor to hold the computed distances
@@ -191,25 +200,25 @@ def pairwise_distance_euclidean_mem_efficient_batched(data1, data2, device=torch
     for i in range(0, data1.shape[0], batch_size):
         # Compute the end index of the current batch
         end = min(i + batch_size, data1.shape[0])
-        
+
         # Transfer the current batch to GPU and compute its squared norm
-        batch_data1 = data1[i:end].to(device) # TODO try out half here
+        batch_data1 = data1[i:end].to(device)  # TODO try out half here
         norm1 = batch_data1.pow(2).sum(dim=1, keepdim=True)
-        
+
         # Compute dot products between the current batch and data2
         dot_product = torch.mm(batch_data1, data2.transpose(0, 1))
         dis = norm1 + norm2.transpose(0, 1) - 2 * dot_product
         # Compute distances for the current batch and store them
         cluster_choice[i:end] = torch.argmin(dis, dim=1)
         # distances[i:end, :] = dis.cpu()
-    
+
     # Optionally, move the distances matrix back to CPU if further processing is needed there
     # distances = distances.cpu()
-    
+
     return cluster_choice
 
 
-def pairwise_distance_euclidean_mem_efficient(data1, data2, device=torch.device('cpu')):
+def pairwise_distance_euclidean_mem_efficient(data1, data2, device=torch.device("cpu")):
     # data1 shape: [1598000, 768]
     # data2 shape: [4096, 768]
     data1, data2 = data1.to(device), data2.to(device)
@@ -224,7 +233,8 @@ def pairwise_distance_euclidean_mem_efficient(data1, data2, device=torch.device(
 
     return norm1 + norm2.transpose(0, 1) - 2 * dot_product
 
-def pairwise_distance(data1, data2, device=torch.device('cpu')):
+
+def pairwise_distance(data1, data2, device=torch.device("cpu")):
     # transfer to device
     data1, data2 = data1.to(device), data2.to(device)
 
@@ -233,7 +243,7 @@ def pairwise_distance(data1, data2, device=torch.device('cpu')):
 
     # 1*N*M
     B = data2.unsqueeze(dim=0)
-    
+
     # OOM here:
     # ipdb> A.size()
     # torch.Size([199000, 1, 768])
@@ -245,7 +255,7 @@ def pairwise_distance(data1, data2, device=torch.device('cpu')):
     return dis
 
 
-def pairwise_cosine(data1, data2, device=torch.device('cpu')):
+def pairwise_cosine(data1, data2, device=torch.device("cpu")):
     # transfer to device
     data1, data2 = data1.to(device), data2.to(device)
 
@@ -264,4 +274,3 @@ def pairwise_cosine(data1, data2, device=torch.device('cpu')):
     # return N*N matrix for pairwise distance
     cosine_dis = 1 - cosine.sum(dim=-1).squeeze()
     return cosine_dis
-
