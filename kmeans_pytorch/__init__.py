@@ -79,7 +79,7 @@ def kmeans(
             if center_shift_potential_inf**2 < tol:
                 break
                 
-            chunks = [torch.load(j, map_location="cuda", mmap_mode="r") for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
+            chunks = [torch.load(j, map_location="cuda") for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
             X_CHUNK = (
                 (torch.cat(chunks, dim=0)).float()
                 if len(chunks) > 1
