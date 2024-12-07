@@ -74,10 +74,7 @@ def kmeans(
             if iteration > 200000:
                 break
 
-            chunks = [
-                torch.load(X_CHUNK_PATHS_TRAIN[j])
-                for j in X_CHUNK_PATHS_TRAIN[i : i + 2]
-            ]
+            chunks = [torch.load(j) for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
             X_CHUNK = (
                 (torch.cat(chunks, dim=0)).float()
                 if len(chunks) > 1
