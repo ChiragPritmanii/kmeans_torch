@@ -50,7 +50,7 @@ def kmeans(
         raise NotImplementedError
 
     try:
-        initial_state = torch.load(initial_state_path)
+        initial_state = torch.load(initial_state_path).to(device)
     except:
         initial_state = None
 
