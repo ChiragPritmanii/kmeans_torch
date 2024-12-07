@@ -1,7 +1,9 @@
-import numpy as np
-import torch
+import os
 from glob import glob
 from tqdm import tqdm
+
+import torch
+import numpy as np
 
 
 def initialize(X, num_clusters):
@@ -19,6 +21,7 @@ def initialize(X, num_clusters):
 
 def kmeans(
     X_PATH,
+    save_path,
     num_clusters,
     distance="euclidean",
     tol=1e-4,
@@ -177,14 +180,21 @@ def kmeans(
                     iteration_start = iteration
                     start_index += trunk_size
                     X = None
-                    
 
                     if start_index + trunk_size < chunk_size:
                         continue
                     else:
                         # Full data is processed
-                        torch.save(choice_cluster.cpu(), "cluster_ids_iter_{iteration}.pt") 
-                        torch.save(initial_state.cpu(), "cluster_centers_iter_{iteration}.pt")
+                        torch.save(
+                            choice_cluster.cpu(),
+                            os.path.join(save_path, f"cluster_ids_iter_{iteration}.pt"),
+                        )
+                        torch.save(
+                            initial_state.cpu(),
+                            os.path.join(
+                                save_path, f"cluster_centers_iter_{iteration}.pt"
+                            ),
+                        )
                         print("The current chunk has been processed succesfully!")
                         break
 
