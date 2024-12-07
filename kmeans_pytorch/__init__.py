@@ -177,11 +177,14 @@ def kmeans(
                     iteration_start = iteration
                     start_index += trunk_size
                     X = None
+                    
 
                     if start_index + trunk_size < chunk_size:
                         continue
                     else:
                         # Full data is processed
+                        torch.save(choice_cluster.cpu(), "cluster_ids_iter_{iteration}.pt") 
+                        torch.save(initial_state.cpu(), "cluster_centers_iter_{iteration}.pt")
                         print("The current chunk has been processed succesfully!")
                         break
 
