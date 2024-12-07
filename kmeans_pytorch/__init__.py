@@ -65,6 +65,8 @@ def kmeans(
     epochs = 100_000
     tqdm_meter = tqdm(desc="[running kmeans]")
 
+    center_shift_potential_inf = 1e5
+
     # Three epochs
     for epoch in range(epochs):
         if center_shift_potential_inf**2 < tol:
