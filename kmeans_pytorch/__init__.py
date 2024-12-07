@@ -25,7 +25,7 @@ def kmeans(
     num_clusters,
     distance="euclidean",
     tol=1e-4,
-    trunk_size=2560000,
+    trunk_size=5120000,
     device=torch.device("cpu"),
 ):
     """
@@ -62,44 +62,48 @@ def kmeans(
 
     dataset_size = 100 * 16 * 1601 * len(X_CHUNK_PATHS)
 
-    iteration = 0
+    epochs = 100_000
     tqdm_meter = tqdm(desc="[running kmeans]")
 
     # Three epochs
-    for epoch in range(1):
+    for epoch in range(epochs):
+        if center_shift_potential_inf**2 < tol:
+            break
         print("Epoch", epoch)
+        X_CHUNK_PATHS_TRAIN = [X_CHUNK_PATHS[i] for i in torch.randperm(len(X_CHUNK_PATHS_TRAIN))]
+
         # load upto 2 chunks because of memory constraints
         for i in range(0, len(X_CHUNK_PATHS_TRAIN), 2):
-
-            # if iteration reaches more than 200K then while loop breaks
-            # and the below condition would break the upper for loop too
-            # like mini-batch kmeans: run the algo for fixed number of iterations or until convergence (when centroids stop moving significantly).
-            if iteration > 200000:
+            if center_shift_potential_inf**2 < tol:
                 break
-
+                
             chunks = [torch.load(j) for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
             X_CHUNK = (
                 (torch.cat(chunks, dim=0)).float()
                 if len(chunks) > 1
                 else chunks[0].float()
             )
+            # set chunks to None once the chunk is loaded as tensor
+            chunks = None
+
             chunk_size = X_CHUNK.size(0)
 
             print(f"Loaded the pair of chunks: {X_CHUNK_PATHS_TRAIN[i:i+2]}")
+            print(f"Loaded number of vectors: {chunk_size}")
 
             X = None
             start_index = 0
-            iteration_start = iteration
+            # iteration_start = iteration
 
             # shuffle the indices
             rand_indices = torch.randperm(X_CHUNK.size(0))
             X_CHUNK = X_CHUNK[rand_indices]
-            # For each epochs
+
+            # For each batch
             while True:
                 # A subset of data
                 if X is None:
                     X = X_CHUNK[start_index : start_index + trunk_size].to(device)
-                    # X = X_FULL[start_index:start_index + trunk_size]
                     print(
                         "Process data from {} to {}".format(
                             start_index, start_index + trunk_size
@@ -131,8 +135,10 @@ def kmeans(
                         initial_state[index] = initial_state_pre[index]
                         non_matched_centroid += 1
                     # if the centroid has points in the cluster, then recalculate the centroid taking mean of all points
+                    # use gradient based update where we take weighted mean for applying the update to 
                     else:
-                        initial_state[index] = selected.mean(dim=0)
+                        gamma = 1/selected.size(0)
+                        initial_state[index] = initial_state[index] + gamma * (selected.mean(dim=0) - initial_state[index])
                 
                 # take the euclidean distance between the previous and newer centroids
                 # then take the average to find out the average change in position of centroids
@@ -152,13 +158,8 @@ def kmeans(
 
                 assert not torch.isinf(initial_state).any(), initial_state
 
-                # increment iteration
-                # the iterations on the current chunk keep increasing till the center_shift_potential_inf**2 < tol
-                # the centroids need to keep recalculating and till center_shift_potential_inf**2 < tol satisfies
-                iteration = iteration + 1
-                # update tqdm meter
                 tqdm_meter.set_postfix(
-                    iteration=f"{iteration}",
+                    epoch=f"{epoch}",
                     center_shift=f"{center_shift ** 2:0.6f}",
                     center_shift_potential_inf=f"{center_shift_potential_inf ** 2:0.6f}",
                     tol=f"{tol:0.6f}",
@@ -166,45 +167,43 @@ def kmeans(
                 )
                 tqdm_meter.update()
 
-                # if the total iterations exceed 200000 then break the algorithm; set the hard limit
-                if iteration > 200000:
+                if center_shift_potential_inf**2 < tol:
+                    print("convergence has been achieved!")
+                    torch.save(
+                            choice_cluster.cpu(),
+                            os.path.join(save_path, f"cluster_ids_iter_{epoch}.pt"),
+                        )
+                    torch.save(
+                        initial_state.cpu(),
+                        os.path.join(
+                            save_path, f"cluster_centers_iter_{epoch}.pt"
+                        ),
+                    )
                     break
 
-                # not sure why the logic "or iteration > 20000" is added in previous code:
-                # that won't let the centroids adjust to the current set of data and keep sliding the window to see newer data
-                # when the above mentioned condition is satisfied
-                # if center_shift_potential_inf**2 < tol or iteration > 20000:
-                #     start_index += trunk_size
-                #     X = None
-
-                # changed to:
-                # if the center_shift_potential_inf**2 becomes less than tolerance, means the centroids aren't shifting that much so the centroids are stable so move on to the next trunk
-                # if it's taking more than 20K iterations on that specific trunk then move on to the next
-                if (
-                    center_shift_potential_inf**2 < tol
-                    or (iteration - iteration_start) > 20000
-                ):
-                    iteration_start = iteration
-                    start_index += trunk_size
-                    X = None
-
-                    if start_index + trunk_size < chunk_size:
-                        continue
-                    else:
-                        # Full data is processed
-                        torch.save(
+                # save every 5 epochs
+                if epoch%5==0:
+                    torch.save(
                             choice_cluster.cpu(),
-                            os.path.join(save_path, f"cluster_ids_iter_{iteration}.pt"),
+                            os.path.join(save_path, f"cluster_ids_iter_{epoch}.pt"),
                         )
-                        torch.save(
-                            initial_state.cpu(),
-                            os.path.join(
-                                save_path, f"cluster_centers_iter_{iteration}.pt"
-                            ),
-                        )
-                        print("The current chunk has been processed succesfully!")
-                        break
+                    torch.save(
+                        initial_state.cpu(),
+                        os.path.join(
+                            save_path, f"cluster_centers_iter_{epoch}.pt"
+                        ),
+                    )
 
+                start_index += trunk_size
+                X = None
+
+                if start_index + trunk_size < chunk_size:
+                    continue
+                else:
+                    # batch is processed
+                    print("The current chunk has been processed succesfully!")
+                    break
+                    
     return choice_cluster.cpu(), initial_state.cpu()
 
 
