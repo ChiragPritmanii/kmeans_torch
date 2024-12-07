@@ -54,8 +54,8 @@ def kmeans(
     X_CHUNK_PATHS_TRAIN = X_CHUNK_PATHS_ORDERED[:-1]  # remove the last chunk from train
     X_CHUNK_PATHS_VALID = X_CHUNK_PATHS_ORDERED[-1]  # leave one out for validation
 
-    print(f"Chunks used for training:\n{X_CHUNK_PATHS_TRAIN}")
-    print(f"Chunks used for validation:\n{X_CHUNK_PATHS_VALID}")
+    print(f"Chunks used for training:{len(X_CHUNK_PATHS_TRAIN)}")
+    print(f"Chunks used for validation:{X_CHUNK_PATHS_VALID}")
 
     dataset_size = 100 * 16 * 1601 * len(X_CHUNK_PATHS)
 
