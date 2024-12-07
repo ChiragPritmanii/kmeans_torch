@@ -79,7 +79,7 @@ def kmeans(
             if center_shift_potential_inf**2 < tol:
                 break
                 
-            chunks = [torch.load(j) for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
+            chunks = [torch.load(j, map_location="cuda", mmap_mode="r") for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
             X_CHUNK = (
                 (torch.cat(chunks, dim=0)).float()
                 if len(chunks) > 1
@@ -105,6 +105,7 @@ def kmeans(
             while True:
                 # A subset of data
                 if X is None:
+                    # its already on device
                     X = X_CHUNK[start_index : start_index + trunk_size].to(device)
                     print(
                         "Process data from {} to {}".format(
