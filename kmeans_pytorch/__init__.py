@@ -22,6 +22,7 @@ def initialize(X, num_clusters):
 def kmeans(
     X_PATH,
     save_path,
+    initial_state_path,
     num_clusters,
     distance="euclidean",
     tol=1e-4,
@@ -48,7 +49,10 @@ def kmeans(
     else:
         raise NotImplementedError
 
-    initial_state = None
+    try:
+        initial_state = torch.load(initial_state_path)
+    except:
+        initial_state = None
 
     X_CHUNK_PATHS = glob(X_PATH + "/*pt")
     X_CHUNK_PATHS_ORDER = torch.randperm(len(X_CHUNK_PATHS))
@@ -79,7 +83,7 @@ def kmeans(
             if center_shift_potential_inf**2 < tol:
                 break
                 
-            chunks = [torch.load(j, map_location="cuda") for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
+            chunks = [torch.load(j) for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
             X_CHUNK = (
                 (torch.cat(chunks, dim=0)).float()
                 if len(chunks) > 1
