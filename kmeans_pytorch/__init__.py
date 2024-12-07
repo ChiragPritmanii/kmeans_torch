@@ -126,18 +126,24 @@ def kmeans(
                         torch.nonzero(choice_cluster == index).squeeze().to(device)
                     )
                     selected = torch.index_select(X, 0, selected)
+                    # if the centroid has no points in the cluster, do not change it
                     if len(selected) == 0:
                         initial_state[index] = initial_state_pre[index]
                         non_matched_centroid += 1
+                    # if the centroid has points in the cluster, then recalculate the centroid taking mean of all points
                     else:
                         initial_state[index] = selected.mean(dim=0)
-
+                
+                # take the euclidean distance between the previous and newer centroids
+                # then take the average to find out the average change in position of centroids
                 center_shift = torch.mean(
                     torch.sqrt(
                         torch.sum((initial_state - initial_state_pre) ** 2, dim=1)
                     )
                 )
 
+                # take the euclidean distance between the previous and newer centroids
+                # then take the sum to find out the total change in position of centroids
                 center_shift_potential_inf = torch.sum(
                     torch.sqrt(
                         torch.sum((initial_state - initial_state_pre) ** 2, dim=1)
@@ -148,6 +154,7 @@ def kmeans(
 
                 # increment iteration
                 # the iterations on the current chunk keep increasing till the center_shift_potential_inf**2 < tol
+                # the centroids need to keep recalculating and till center_shift_potential_inf**2 < tol satisfies
                 iteration = iteration + 1
                 # update tqdm meter
                 tqdm_meter.set_postfix(
