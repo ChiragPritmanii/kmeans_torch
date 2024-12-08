@@ -80,11 +80,15 @@ def kmeans(
             # save every epoch
             torch.save(
                 choice_cluster.cpu(),
-                os.path.join(save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"),
+                os.path.join(
+                    save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"
+                ),
             )
             torch.save(
                 initial_state.cpu(),
-                os.path.join(save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"),
+                os.path.join(
+                    save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"
+                ),
             )
             print("checkpoint saved!")
 
@@ -104,12 +108,12 @@ def kmeans(
             # if the below criteria satisfies then break loop
             if center_shift_potential_inf**2 < tol:
                 break
-            
+
             start = time.time()
             X_CHUNK = torch.load(X_CHUNK_PATHS_TRAIN[i], mmap=True).float()
             X_CHUNK = X_CHUNK.clone()
             end = time.time()
-            print(f"took {end_time - start_time:.2f} seconds to load and clone the chunk")
+            print(f"took {end - start:.2f} seconds to load and clone the chunk")
             chunk_size = X_CHUNK.size(0)
 
             print(f"Loaded the pair of chunks: {X_CHUNK_PATHS_TRAIN[i:i+2]}")
