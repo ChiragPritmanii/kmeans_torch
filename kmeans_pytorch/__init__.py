@@ -66,11 +66,12 @@ def kmeans(
 
     dataset_size = 100 * 16 * 1601 * len(X_CHUNK_PATHS)
 
-    epochs = 100_000
+    epochs = 100
     tqdm_meter = tqdm(desc="[running kmeans]")
 
     center_shift_potential_inf = 1e5
 
+    iteration = 0
     # Three epochs
     for epoch in range(epochs):
         if center_shift_potential_inf**2 < tol:
@@ -80,10 +81,11 @@ def kmeans(
 
         # load upto 2 chunks because of memory constraints
         for i in range(0, len(X_CHUNK_PATHS_TRAIN), 2):
+            
             if center_shift_potential_inf**2 < tol:
                 break
-                
-            chunks = [torch.load(j) for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
+
+            chunks = [torch.load(j, mmap=True) for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
             X_CHUNK = (
                 (torch.cat(chunks, dim=0)).float()
                 if len(chunks) > 1
