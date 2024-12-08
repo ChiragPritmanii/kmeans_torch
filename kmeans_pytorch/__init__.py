@@ -26,7 +26,7 @@ def kmeans(
     num_clusters,
     distance="euclidean",
     tol=1e-4,
-    trunk_size=5120000,
+    trunk_size=2_560_000,
     device=torch.device("cpu"),
 ):
     """
@@ -51,8 +51,10 @@ def kmeans(
 
     try:
         initial_state = torch.load(initial_state_path).to(device)
+        print("initial state is loaded")
     except:
         initial_state = None
+        print("initial state is set to None")
 
     X_CHUNK_PATHS = glob(X_PATH + "/*pt")
     X_CHUNK_PATHS_ORDER = torch.randperm(len(X_CHUNK_PATHS))
@@ -67,33 +69,42 @@ def kmeans(
     dataset_size = 100 * 16 * 1601 * len(X_CHUNK_PATHS)
 
     epochs = 100
+    iteration = 0
+    center_shift_potential_inf = 1e5
     tqdm_meter = tqdm(desc="[running kmeans]")
 
-    center_shift_potential_inf = 1e5
-
-    iteration = 0
     # Three epochs
     for epoch in range(epochs):
+        # save every epoch
+        torch.save(
+            choice_cluster.cpu(),
+            os.path.join(save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"),
+        )
+        torch.save(
+            initial_state.cpu(),
+            os.path.join(save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"),
+        )
+        print("checkpoint saved!")
+
+        # if the below criteria satisfies then break loop
         if center_shift_potential_inf**2 < tol:
             break
-        print("Epoch", epoch)
-        X_CHUNK_PATHS_TRAIN = [X_CHUNK_PATHS[i] for i in torch.randperm(len(X_CHUNK_PATHS_TRAIN))]
 
-        # load upto 2 chunks because of memory constraints
-        for i in range(0, len(X_CHUNK_PATHS_TRAIN), 2):
-            
+        print("Epoch", epoch)
+        # randomize the chunk order every epoch
+        X_CHUNK_PATHS_TRAIN = [
+            X_CHUNK_PATHS[i] for i in torch.randperm(len(X_CHUNK_PATHS_TRAIN))
+        ]
+
+        # load only 1 chunk because of memory constraints
+        for i in range(0, len(X_CHUNK_PATHS_TRAIN), 1):
+
+            # if the below criteria satisfies then break loop
             if center_shift_potential_inf**2 < tol:
                 break
 
-            chunks = [torch.load(j, mmap=True) for j in X_CHUNK_PATHS_TRAIN[i : i + 2]]
-            X_CHUNK = (
-                (torch.cat(chunks, dim=0)).float()
-                if len(chunks) > 1
-                else chunks[0].float()
-            )
-            # set chunks to None once the chunk is loaded as tensor
-            chunks = None
-
+            X_CHUNK = torch.load(X_CHUNK_PATHS_TRAIN[i], mmap=True).float()
+            X_CHUNK = X_CHUNK.clone()
             chunk_size = X_CHUNK.size(0)
 
             print(f"Loaded the pair of chunks: {X_CHUNK_PATHS_TRAIN[i:i+2]}")
@@ -111,12 +122,10 @@ def kmeans(
             while True:
                 # A subset of data
                 if X is None:
-                    # its already on device
+                    # put it on gpu
                     X = X_CHUNK[start_index : start_index + trunk_size].to(device)
                     print(
-                        "Process data from {} to {}".format(
-                            start_index, start_index + trunk_size
-                        )
+                        f"Process data from {start_index} to {start_index + trunk_size}"
                     )
 
                 # This initial_state is iteratively updated by the dataset
@@ -129,12 +138,10 @@ def kmeans(
 
                 initial_state_pre = initial_state.clone()
 
-                # non_matched centroids usually increase as we increase the number of clusters
-                # there are some center shifts that keep happening as the centroids are recalculated
-                # with each new addition in the cluster corresponding to the centroid representing the cluster
+                # the centroids to which no point is mapped in the batch are non matched centroids
+                # these centroids are not updated for the current batch
                 non_matched_centroid = 0
                 for index in range(num_clusters):
-                    # selected = torch.nonzero(choice_cluster == index).squeeze().cpu() # .to(device)
                     selected = (
                         torch.nonzero(choice_cluster == index).squeeze().to(device)
                     )
@@ -144,11 +151,17 @@ def kmeans(
                         initial_state[index] = initial_state_pre[index]
                         non_matched_centroid += 1
                     # if the centroid has points in the cluster, then recalculate the centroid taking mean of all points
-                    # use gradient based update where we take weighted mean for applying the update to 
+                    # use weighted average update where we take weighted difference of mean of a cluster's points and current centroid to update centroids
                     else:
-                        gamma = 1/selected.size(0)
-                        initial_state[index] = initial_state[index] + gamma * (selected.mean(dim=0) - initial_state[index])
-                
+                        gamma = 1 / selected.size(0)
+                        # comment the below print statement
+                        print(
+                            f"Index: {index}, Gamma: {gamma}, Cluster Size {selected.size(0)}"
+                        )
+                        initial_state[index] = initial_state[index] + gamma * (
+                            selected.mean(dim=0) - initial_state[index]
+                        )
+
                 # take the euclidean distance between the previous and newer centroids
                 # then take the average to find out the average change in position of centroids
                 center_shift = torch.mean(
@@ -167,8 +180,12 @@ def kmeans(
 
                 assert not torch.isinf(initial_state).any(), initial_state
 
+                # one batch has been passed so increment the iteration
+                iteration += 1
+
                 tqdm_meter.set_postfix(
                     epoch=f"{epoch}",
+                    iteration=f"{iteration}",
                     center_shift=f"{center_shift ** 2:0.6f}",
                     center_shift_potential_inf=f"{center_shift_potential_inf ** 2:0.6f}",
                     tol=f"{tol:0.6f}",
@@ -176,32 +193,41 @@ def kmeans(
                 )
                 tqdm_meter.update()
 
+                # save every 10 iteraions (chunks)
+                if iteration % 10 == 0:
+                    torch.save(
+                        choice_cluster.cpu(),
+                        os.path.join(
+                            save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"
+                        ),
+                    )
+                    torch.save(
+                        initial_state.cpu(),
+                        os.path.join(
+                            save_path,
+                            f"cluster_centers_epoch_{epoch}_iter_{iteration}.pt",
+                        ),
+                    )
+                    print("checkpoint saved!")
+
                 if center_shift_potential_inf**2 < tol:
                     print("convergence has been achieved!")
                     torch.save(
-                            choice_cluster.cpu(),
-                            os.path.join(save_path, f"cluster_ids_iter_{epoch}.pt"),
-                        )
+                        choice_cluster.cpu(),
+                        os.path.join(
+                            save_path,
+                            f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt",
+                        ),
+                    )
                     torch.save(
                         initial_state.cpu(),
                         os.path.join(
-                            save_path, f"cluster_centers_iter_{epoch}.pt"
+                            save_path,
+                            f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt",
                         ),
                     )
+                    print("checkpoint saved!")
                     break
-
-                # save every 5 epochs
-                if epoch%5==0:
-                    torch.save(
-                            choice_cluster.cpu(),
-                            os.path.join(save_path, f"cluster_ids_iter_{epoch}.pt"),
-                        )
-                    torch.save(
-                        initial_state.cpu(),
-                        os.path.join(
-                            save_path, f"cluster_centers_iter_{epoch}.pt"
-                        ),
-                    )
 
                 start_index += trunk_size
                 X = None
@@ -212,7 +238,7 @@ def kmeans(
                     # batch is processed
                     print("The current chunk has been processed succesfully!")
                     break
-                    
+
     return choice_cluster.cpu(), initial_state.cpu()
 
 
