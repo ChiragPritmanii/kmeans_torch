@@ -116,8 +116,7 @@ def kmeans(
             print(f"took {end - start:.2f} seconds to load and clone the chunk")
             chunk_size = X_CHUNK.size(0)
 
-            print(f"Loaded the chunk: {X_CHUNK_PATHS_TRAIN[i]}")
-            print(f"Loaded number of vectors: {chunk_size}")
+            print(f"Loaded the chunk: {X_CHUNK_PATHS_TRAIN[i]}; number of vectors: {chunk_size}")
 
             X = None
             start_index = 0
