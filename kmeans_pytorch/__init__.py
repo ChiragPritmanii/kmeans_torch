@@ -164,9 +164,9 @@ def kmeans(
                     else:
                         gamma = 1 / selected.size(0)
                         # comment the below print statement
-                        print(
-                            f"Index: {index}, Gamma: {gamma}, Cluster Size {selected.size(0)}"
-                        )
+                        # print(
+                        #     f"Index: {index}, Gamma: {gamma}, Cluster Size {selected.size(0)}"
+                        # )
                         initial_state[index] = initial_state[index] + gamma * (
                             selected.mean(dim=0) - initial_state[index]
                         )
