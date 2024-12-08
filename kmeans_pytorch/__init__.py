@@ -76,16 +76,17 @@ def kmeans(
 
     # Three epochs
     for epoch in range(epochs):
-        # save every epoch
-        torch.save(
-            choice_cluster.cpu(),
-            os.path.join(save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"),
-        )
-        torch.save(
-            initial_state.cpu(),
-            os.path.join(save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"),
-        )
-        print("checkpoint saved!")
+        if epoch > 0:
+            # save every epoch
+            torch.save(
+                choice_cluster.cpu(),
+                os.path.join(save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"),
+            )
+            torch.save(
+                initial_state.cpu(),
+                os.path.join(save_path, f"cluster_ids_epoch_{epoch}_iter_{iteration}.pt"),
+            )
+            print("checkpoint saved!")
 
         # if the below criteria satisfies then break loop
         if center_shift_potential_inf**2 < tol:
